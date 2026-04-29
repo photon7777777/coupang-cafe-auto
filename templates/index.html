@@ -21,8 +21,13 @@
         <form id="workflowForm">
             <div class="form-grid">
                 <div class="form-group full-width">
-                    <label for="coupang_url">쿠팡 상품 URL</label>
-                    <input type="url" id="coupang_url" placeholder="https://www.coupang.com/vp/products/..." required>
+                    <label for="coupang_urls">쿠팡 상품 URL (여러 개일 경우 줄바꿈으로 구분)</label>
+                    <textarea id="coupang_urls" rows="5" placeholder="https://www.coupang.com/vp/products/1...&#10;https://www.coupang.com/vp/products/2..." required></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="interval_minutes">포스팅 간격 (분)</label>
+                    <input type="number" id="interval_minutes" value="5" min="1" required>
                 </div>
 
                 <div class="form-group">
@@ -73,7 +78,7 @@
     <script>
         // 페이지 로드 시 저장된 값 불러오기
         window.addEventListener('DOMContentLoaded', () => {
-            const fields = ['partners_id', 'gemini_key', 'naver_id', 'naver_pw', 'cafe_id', 'menu_id'];
+            const fields = ['partners_id', 'gemini_key', 'naver_id', 'naver_pw', 'cafe_id', 'menu_id', 'interval_minutes'];
             fields.forEach(field => {
                 const saved = localStorage.getItem('coupang_poster_' + field);
                 if (saved) {
@@ -98,24 +103,25 @@
             resultCard.className = 'result-card';
 
             const payload = {
-                coupang_url: document.getElementById('coupang_url').value,
+                coupang_urls: document.getElementById('coupang_urls').value.split('\n').map(u => u.trim()).filter(u => u),
                 partners_id: document.getElementById('partners_id').value,
                 gemini_key: document.getElementById('gemini_key').value,
                 naver_id: document.getElementById('naver_id').value,
                 naver_pw: document.getElementById('naver_pw').value,
                 cafe_id: document.getElementById('cafe_id').value,
-                menu_id: document.getElementById('menu_id').value
+                menu_id: document.getElementById('menu_id').value,
+                interval_minutes: parseInt(document.getElementById('interval_minutes').value) || 5
             };
 
             // 로컬 스토리지에 입력값 저장 (다음 실행 시 자동 로드)
             Object.keys(payload).forEach(key => {
-                if (key !== 'coupang_url') { // 매번 달라지는 URL은 제외
+                if (key !== 'coupang_urls') { // 매번 달라지는 URL은 제외
                     localStorage.setItem('coupang_poster_' + key, payload[key]);
                 }
             });
 
             try {
-                const response = await fetch('/api/run-workflow', {
+                const response = await fetch('/api/run-bulk-workflow', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -125,16 +131,14 @@
                 
                 resultCard.style.display = 'block';
                 if (data.success) {
-                    document.getElementById('resultTitle').textContent = '✅ 포스팅 성공!';
+                    document.getElementById('resultTitle').textContent = '🚀 자동 포스팅 시작됨!';
                     document.getElementById('resultTitle').style.color = 'var(--success)';
                     document.getElementById('resultDesc').innerHTML = `
-                        <strong>상품명:</strong> ${data.product_name}<br>
-                        <strong>생성된 제목:</strong> ${data.title}<br>
-                        <br>
-                        ${data.message}
+                        총 <strong>${payload.coupang_urls.length}개</strong>의 상품을 ${payload.interval_minutes}분 간격으로 포스팅합니다.<br>
+                        서버 로그에서 진행 상황을 확인하실 수 있습니다.
                     `;
-                    // 포스팅 성공 시 URL 입력 필드 자동 삭제
-                    document.getElementById('coupang_url').value = '';
+                    // 성공 시 URL 입력 필드 자동 삭제
+                    document.getElementById('coupang_urls').value = '';
                 } else {
                     resultCard.classList.add('error');
                     document.getElementById('resultTitle').textContent = `❌ 실패 (Step: ${data.step})`;

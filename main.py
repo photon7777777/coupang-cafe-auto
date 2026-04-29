@@ -1,9 +1,12 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from typing import List
 import os
+import time
+import asyncio
 
 from scraper import scrape_coupang
 from gemini_helper import generate_blog_post
@@ -27,64 +30,101 @@ class WorkflowRequest(BaseModel):
     cafe_id: str
     menu_id: str
 
+class BulkWorkflowRequest(BaseModel):
+    coupang_urls: List[str]
+    partners_id: str
+    gemini_key: str
+    naver_id: str
+    naver_pw: str
+    cafe_id: str
+    menu_id: str
+    interval_minutes: int
+
+def execute_single_posting(url: str, req_data: dict):
+    """단일 상품에 대한 스크래핑-AI생성-포스팅 워크플로우를 실행합니다."""
+    try:
+        print(f"\n[INFO] 작업 시작: {url}")
+        # Step 1: 데이터 추출
+        scrape_result = scrape_coupang(url)
+        if not scrape_result.get("success"):
+            print(f"[ERROR] 스크래핑 실패: {scrape_result.get('error')}")
+            return False
+            
+        # Step 2: 파트너스 링크 생성
+        partner_link = f"{url}&af_id={req_data['partners_id']}"
+        
+        # Step 3: AI 콘텐츠 생성
+        content_full = generate_blog_post(
+            api_key=req_data['gemini_key'],
+            product_info=scrape_result,
+            partner_link=partner_link
+        )
+        
+        lines = [line for line in content_full.split('\n') if line.strip()]
+        title = lines[0].replace("#", "").replace("*", "").strip()
+        body = '\n'.join(lines[1:]).strip()
+
+        # Step 4: 네이버 카페 포스팅
+        post_result = post_to_naver_cafe(
+            naver_id=req_data['naver_id'],
+            naver_pw=req_data['naver_pw'],
+            cafe_id=req_data['cafe_id'],
+            menu_id=req_data['menu_id'],
+            title=title,
+            content=body,
+            partner_link=partner_link,
+            image_url=scrape_result.get("image_url", ""),
+            product_name=scrape_result.get("product_name", "")
+        )
+        
+        if post_result.get("success"):
+            print(f"[SUCCESS] 포스팅 완료: {title}")
+            return True
+        else:
+            print(f"[ERROR] 포스팅 실패: {post_result.get('error')}")
+            return False
+    except Exception as e:
+        print(f"[ERROR] 예외 발생: {str(e)}")
+        return False
+
+async def process_bulk_posting(req: BulkWorkflowRequest):
+    """백그라운드에서 일정 간격으로 대량 포스팅을 수행합니다."""
+    req_dict = req.dict()
+    total = len(req.coupang_urls)
+    
+    for i, url in enumerate(req.coupang_urls):
+        print(f"\n[BULK] 전체 {total}개 중 {i+1}번째 진행 중...")
+        success = execute_single_posting(url, req_dict)
+        
+        # 마지막 아이템이 아니면 대기
+        if i < total - 1:
+            wait_seconds = req.interval_minutes * 60
+            print(f"[BULK] 다음 포스팅까지 {req.interval_minutes}분 대기합니다...")
+            await asyncio.sleep(wait_seconds)
+    
+    print("\n[BULK] 모든 예약 포스팅 작업이 완료되었습니다.")
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/api/run-workflow")
 async def run_workflow(req: WorkflowRequest):
-    try:
-        # Step 1: 데이터 추출
-        scrape_result = scrape_coupang(req.coupang_url)
-        if not scrape_result.get("success"):
-            return JSONResponse(status_code=400, content={"success": False, "step": "scraping", "error": scrape_result.get("error")})
-            
-        if scrape_result.get("product_name") == "제품명 알 수 없음":
-            return JSONResponse(status_code=400, content={"success": False, "step": "scraping", "error": "쿠팡 상품 정보를 정상적으로 가져오지 못했습니다. 입력하신 URL이 정확한 모바일/PC 상품 주소인지 확인해 주세요."})
+    # 기존 단일 포스팅 API (호환성 유지)
+    success = execute_single_posting(req.coupang_url, req.dict())
+    if success:
+        return JSONResponse(content={"success": True, "message": "포스팅 성공"})
+    else:
+        return JSONResponse(status_code=500, content={"success": False, "message": "포스팅 실패"})
 
-        # Step 2: 파트너스 링크 생성 (가상)
-        # 실제 API가 없으므로 간단히 쿼리 파라미터 조합으로 모사
-        partner_link = f"{req.coupang_url}&af_id={req.partners_id}"
-        
-        # Step 3: AI 콘텐츠 생성
-        content_full = generate_blog_post(
-            api_key=req.gemini_key,
-            product_info=scrape_result,
-            partner_link=partner_link
-        )
-        
-        # 빈 줄 제거 및 첫 번째 텍스트를 제목으로
-        lines = [line for line in content_full.split('\n') if line.strip()]
-        title = lines[0].replace("#", "").replace("*", "").strip()
-        
-        body = '\n'.join(lines[1:]).strip()
-
-        # Step 4: 네이버 카페 포스팅
-        post_result = post_to_naver_cafe(
-            naver_id=req.naver_id,
-            naver_pw=req.naver_pw,
-            cafe_id=req.cafe_id,
-            menu_id=req.menu_id,
-            title=title,
-            content=body,
-            partner_link=partner_link, # 링크 별도 전달
-            image_url=scrape_result.get("image_url", ""),
-            product_name=scrape_result.get("product_name", "")
-        )
-        
-        if not post_result.get("success"):
-            return JSONResponse(status_code=500, content={"success": False, "step": "posting", "error": post_result.get("error")})
-
-        return JSONResponse(content={
-            "success": True,
-            "product_name": scrape_result["product_name"],
-            "title": title,
-            "content_preview": body[:100] + "...",
-            "message": "워크플로우가 성공적으로 완료되었습니다."
-        })
-
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+@app.post("/api/run-bulk-workflow")
+async def run_bulk_workflow(req: BulkWorkflowRequest, background_tasks: BackgroundTasks):
+    # 백그라운드 작업으로 등록하고 즉시 응답
+    background_tasks.add_task(process_bulk_posting, req)
+    return JSONResponse(content={
+        "success": True, 
+        "message": f"총 {len(req.coupang_urls)}개의 상품 포스팅 예약이 완료되었습니다. {req.interval_minutes}분 간격으로 진행됩니다."
+    })
 
 if __name__ == "__main__":
     import uvicorn
