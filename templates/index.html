@@ -62,10 +62,25 @@
                     <input type="text" id="menu_id" placeholder="123" required>
                 </div>
 
-                <button type="submit" class="btn-submit" id="submitBtn">
-                    <span id="btnText">자동 포스팅 시작</span>
-                    <div class="loader" id="loader"></div>
-                </button>
+                <div class="form-group full-width" style="margin-top: -0.5rem; margin-bottom: 1rem;">
+                    <label style="font-size: 0.8rem; opacity: 0.8;">카페/메뉴 프리셋 (자주 쓰는 카페 저장)</label>
+                    <div style="display: flex; gap: 8px;">
+                        <select id="cafe_preset_select" style="flex: 1; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); border-radius: 8px; color: #fff; padding: 5px;">
+                            <option value="">저장된 프리셋 선택...</option>
+                        </select>
+                        <button type="button" id="save_cafe_preset" style="background: var(--secondary-color); border: none; border-radius: 8px; color: #fff; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;">저장</button>
+                        <button type="button" id="delete_cafe_preset" style="background: #ff4d4d; border: none; border-radius: 8px; color: #fff; padding: 5px 10px; cursor: pointer; font-size: 0.8rem;">삭제</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; grid-column: span 2; margin-top: 1rem;">
+                    <button type="submit" class="btn-submit" id="submitBtn" style="flex: 2; margin-top: 0;">
+                        <span id="btnText">자동 포스팅 시작</span>
+                        <div class="loader" id="loader"></div>
+                    </button>
+                    <button type="button" id="pauseBtn" class="btn-secondary" style="flex: 1; display: none; background: #f59e0b; border: none; font-weight: bold;">일시중지</button>
+                    <button type="button" id="stopBtn" class="btn-secondary" style="flex: 1; display: none; background: #ef4444; border: none; font-weight: bold;">정지</button>
+                </div>
             </div>
         </form>
 
@@ -85,6 +100,75 @@
                     document.getElementById(field).value = saved;
                 }
             });
+            updatePresetList();
+        });
+
+        // 프리셋 관리 로직
+        const presetSelect = document.getElementById('cafe_preset_select');
+        const saveBtn = document.getElementById('save_cafe_preset');
+        const deleteBtn = document.getElementById('delete_cafe_preset');
+
+        function updatePresetList() {
+            const presets = JSON.parse(localStorage.getItem('coupang_cafe_presets') || '[]');
+            presetSelect.innerHTML = '<option value="">저장된 프리셋 선택...</option>';
+            presets.forEach((p, idx) => {
+                const opt = document.createElement('option');
+                opt.value = idx;
+                opt.textContent = `${p.cafe_id} / ${p.menu_id}`;
+                presetSelect.appendChild(opt);
+            });
+        }
+
+        saveBtn.addEventListener('click', () => {
+            const cafe_id = document.getElementById('cafe_id').value;
+            const menu_id = document.getElementById('menu_id').value;
+            if (!cafe_id || !menu_id) return alert('카페 ID와 메뉴 ID를 입력해주세요.');
+            
+            const presets = JSON.parse(localStorage.getItem('coupang_cafe_presets') || '[]');
+            presets.push({ cafe_id, menu_id });
+            localStorage.setItem('coupang_cafe_presets', JSON.stringify(presets));
+            updatePresetList();
+            alert('현재 설정이 프리셋으로 저장되었습니다.');
+        });
+
+        deleteBtn.addEventListener('click', () => {
+            const idx = presetSelect.value;
+            if (idx === "") return alert('삭제할 프리셋을 선택해주세요.');
+            
+            let presets = JSON.parse(localStorage.getItem('coupang_cafe_presets') || '[]');
+            presets.splice(idx, 1);
+            localStorage.setItem('coupang_cafe_presets', JSON.stringify(presets));
+            updatePresetList();
+            alert('프리셋이 삭제되었습니다.');
+        });
+
+        presetSelect.addEventListener('change', (e) => {
+            const idx = e.target.value;
+            if (idx !== "") {
+                const presets = JSON.parse(localStorage.getItem('coupang_cafe_presets') || '[]');
+                const p = presets[idx];
+                document.getElementById('cafe_id').value = p.cafe_id;
+                document.getElementById('menu_id').value = p.menu_id;
+            }
+        });
+
+        // 일시중지/정지 제어 로직
+        const pauseBtn = document.getElementById('pauseBtn');
+        const stopBtn = document.getElementById('stopBtn');
+
+        pauseBtn.addEventListener('click', async () => {
+            const res = await fetch('/api/pause', { method: 'POST' });
+            const data = await res.json();
+            pauseBtn.textContent = data.is_paused ? '재개' : '일시중지';
+            pauseBtn.style.background = data.is_paused ? '#10b981' : '#f59e0b';
+        });
+
+        stopBtn.addEventListener('click', async () => {
+            if (confirm('모든 예약 포스팅 작업을 중단하시겠습니까?')) {
+                await fetch('/api/stop', { method: 'POST' });
+                alert('중단 요청을 보냈습니다. 현재 진행 중인 스텝이 끝나면 멈춥니다.');
+                location.reload();
+            }
         });
 
         document.getElementById('workflowForm').addEventListener('submit', async (e) => {
@@ -102,8 +186,16 @@
             resultCard.style.display = 'none';
             resultCard.className = 'result-card';
 
+            // 제어 버튼 표시
+            pauseBtn.style.display = 'block';
+            stopBtn.style.display = 'block';
+
+            const rawUrls = document.getElementById('coupang_urls').value;
+            // 줄바꿈, 공백, 쉼표 등으로 구분된 URL들을 추출하여 배열로 만듦
+            const coupang_urls = rawUrls.split(/[\n, ]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
+
             const payload = {
-                coupang_urls: document.getElementById('coupang_urls').value.split('\n').map(u => u.trim()).filter(u => u),
+                coupang_urls: coupang_urls,
                 partners_id: document.getElementById('partners_id').value,
                 gemini_key: document.getElementById('gemini_key').value,
                 naver_id: document.getElementById('naver_id').value,

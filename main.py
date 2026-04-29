@@ -14,6 +14,12 @@ from naver_cafe import post_to_naver_cafe
 
 app = FastAPI(title="쿠팡 카페 포스팅 자동화")
 
+# 전역 상태 관리
+task_control = {
+    "is_paused": False,
+    "should_stop": False
+}
+
 # 디렉토리 설정
 os.makedirs("templates", exist_ok=True)
 os.makedirs("static", exist_ok=True)
@@ -89,20 +95,57 @@ def execute_single_posting(url: str, req_data: dict):
 
 async def process_bulk_posting(req: BulkWorkflowRequest):
     """백그라운드에서 일정 간격으로 대량 포스팅을 수행합니다."""
+    global task_control
+    task_control["should_stop"] = False
+    task_control["is_paused"] = False
+    
     req_dict = req.dict()
     total = len(req.coupang_urls)
     
     for i, url in enumerate(req.coupang_urls):
+        # 정지 요청 체크
+        if task_control["should_stop"]:
+            print("[BULK] 작업이 중단되었습니다.")
+            break
+            
+        # 일시중지 체크 루프
+        while task_control["is_paused"]:
+            await asyncio.sleep(1)
+            if task_control["should_stop"]:
+                break
+        
+        if task_control["should_stop"]: break
+
         print(f"\n[BULK] 전체 {total}개 중 {i+1}번째 진행 중...")
-        success = execute_single_posting(url, req_dict)
+        execute_single_posting(url, req_dict)
         
         # 마지막 아이템이 아니면 대기
         if i < total - 1:
             wait_seconds = req.interval_minutes * 60
             print(f"[BULK] 다음 포스팅까지 {req.interval_minutes}분 대기합니다...")
-            await asyncio.sleep(wait_seconds)
+            
+            # 대기 시간 동안에도 일시중지/정지 체크를 위해 1초씩 나눠서 대기
+            for _ in range(wait_seconds):
+                if task_control["should_stop"]: break
+                while task_control["is_paused"]:
+                    await asyncio.sleep(1)
+                    if task_control["should_stop"]: break
+                await asyncio.sleep(1)
     
     print("\n[BULK] 모든 예약 포스팅 작업이 완료되었습니다.")
+
+@app.post("/api/pause")
+async def toggle_pause():
+    global task_control
+    task_control["is_paused"] = not task_control["is_paused"]
+    return JSONResponse(content={"is_paused": task_control["is_paused"]})
+
+@app.post("/api/stop")
+async def stop_task():
+    global task_control
+    task_control["should_stop"] = True
+    task_control["is_paused"] = False
+    return JSONResponse(content={"success": True})
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
