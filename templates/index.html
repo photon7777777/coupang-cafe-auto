@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>쿠팡 자동 포스팅 봇</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="bg-circles">
+        <div></div><div></div><div></div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>Coupang Auto Poster</h1>
+            <p class="subtitle">쿠팡 상품 스크래핑부터 네이버 카페 자동 포스팅까지</p>
+        </header>
+
+        <form id="workflowForm">
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="coupang_url">쿠팡 상품 URL</label>
+                    <input type="url" id="coupang_url" placeholder="https://www.coupang.com/vp/products/..." required>
+                </div>
+
+                <div class="form-group">
+                    <label for="partners_id">쿠팡 파트너스 ID</label>
+                    <input type="text" id="partners_id" placeholder="AF1234567" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="gemini_key">Gemini API Key</label>
+                    <input type="password" id="gemini_key" placeholder="AI-..." required>
+                </div>
+
+                <div class="form-group full-width">
+                    <label for="guidelines">글쓰기 커스텀 지침</label>
+                    <textarea id="guidelines" placeholder="예: 30대 주부 타겟으로 친근한 말투로 작성해줘. 장점을 3가지로 요약해줘."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="naver_id">네이버 ID</label>
+                    <input type="text" id="naver_id" placeholder="naver_id" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="naver_pw">네이버 비밀번호</label>
+                    <input type="password" id="naver_pw" placeholder="password" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="cafe_id">네이버 카페 ID</label>
+                    <input type="text" id="cafe_id" placeholder="joonggonara" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="menu_id">카페 메뉴(게시판) ID</label>
+                    <input type="text" id="menu_id" placeholder="123" required>
+                </div>
+
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    <span id="btnText">자동 포스팅 시작</span>
+                    <div class="loader" id="loader"></div>
+                </button>
+            </div>
+        </form>
+
+        <div id="resultCard" class="result-card">
+            <h3 id="resultTitle" style="margin-bottom: 0.5rem;"></h3>
+            <p id="resultDesc" style="color: var(--text-muted); line-height: 1.5;"></p>
+        </div>
+    </div>
+
+    <script>
+        // 페이지 로드 시 저장된 값 불러오기
+        window.addEventListener('DOMContentLoaded', () => {
+            const fields = ['partners_id', 'gemini_key', 'guidelines', 'naver_id', 'naver_pw', 'cafe_id', 'menu_id'];
+            fields.forEach(field => {
+                const saved = localStorage.getItem('coupang_poster_' + field);
+                if (saved) {
+                    document.getElementById(field).value = saved;
+                }
+            });
+        });
+
+        document.getElementById('workflowForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const btn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const loader = document.getElementById('loader');
+            const resultCard = document.getElementById('resultCard');
+            
+            // UI 변경
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            loader.style.display = 'block';
+            resultCard.style.display = 'none';
+            resultCard.className = 'result-card';
+
+            const payload = {
+                coupang_url: document.getElementById('coupang_url').value,
+                partners_id: document.getElementById('partners_id').value,
+                gemini_key: document.getElementById('gemini_key').value,
+                guidelines: document.getElementById('guidelines').value || "자연스럽게 작성해줘",
+                naver_id: document.getElementById('naver_id').value,
+                naver_pw: document.getElementById('naver_pw').value,
+                cafe_id: document.getElementById('cafe_id').value,
+                menu_id: document.getElementById('menu_id').value
+            };
+
+            // 로컬 스토리지에 입력값 저장 (다음 실행 시 자동 로드)
+            Object.keys(payload).forEach(key => {
+                if (key !== 'coupang_url') { // 매번 달라지는 URL은 제외
+                    localStorage.setItem('coupang_poster_' + key, payload[key]);
+                }
+            });
+
+            try {
+                const response = await fetch('/api/run-workflow', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                
+                resultCard.style.display = 'block';
+                if (data.success) {
+                    document.getElementById('resultTitle').textContent = '✅ 포스팅 성공!';
+                    document.getElementById('resultTitle').style.color = 'var(--success)';
+                    document.getElementById('resultDesc').innerHTML = `
+                        <strong>상품명:</strong> ${data.product_name}<br>
+                        <strong>생성된 제목:</strong> ${data.title}<br>
+                        <br>
+                        ${data.message}
+                    `;
+                    // 포스팅 성공 시 URL 입력 필드 자동 삭제
+                    document.getElementById('coupang_url').value = '';
+                } else {
+                    resultCard.classList.add('error');
+                    document.getElementById('resultTitle').textContent = `❌ 실패 (Step: ${data.step})`;
+                    document.getElementById('resultTitle').style.color = 'var(--error)';
+                    document.getElementById('resultDesc').textContent = data.error;
+                }
+            } catch (err) {
+                resultCard.style.display = 'block';
+                resultCard.classList.add('error');
+                document.getElementById('resultTitle').textContent = '❌ 네트워크 오류';
+                document.getElementById('resultTitle').style.color = 'var(--error)';
+                document.getElementById('resultDesc').textContent = err.message;
+            } finally {
+                btn.disabled = false;
+                btnText.style.display = 'block';
+                loader.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
