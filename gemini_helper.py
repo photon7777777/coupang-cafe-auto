@@ -1,6 +1,6 @@
 import google.generativeai as genai
 
-def generate_blog_post(api_key: str, product_info: dict, guidelines: str, partner_link: str) -> str:
+def generate_blog_post(api_key: str, product_info: dict, partner_link: str) -> str:
     """Gemini API를 사용하여 블로그/카페 포스팅용 콘텐츠를 생성합니다."""
     genai.configure(api_key=api_key)
     
@@ -20,11 +20,8 @@ def generate_blog_post(api_key: str, product_info: dict, guidelines: str, partne
     features_text = "\n- ".join(product_info.get("features", []))
     
     prompt = f"""
-당신은 네이버 카페에서 활동하는 전문 블로거이자 마케터입니다.
-아래의 [사용자 특별 지침]을 최우선으로 준수하여 상품 홍보글을 작성하세요.
-
-[사용자 특별 지침] (반드시 이 스타일과 톤앤매너를 따르세요):
-{guidelines}
+당신은 네이버 카페에서 활동하며, 실제로 상품을 구매하여 사용 중인 일반인 사용자입니다.
+전문적인 홍보성 글보다는 이웃에게 추천하듯 친근하고 솔직한 구매 후기를 작성하세요.
 
 [쿠팡 상품 정보]:
 - 상품명: {product_info['product_name']}
@@ -32,12 +29,16 @@ def generate_blog_post(api_key: str, product_info: dict, guidelines: str, partne
 - 주요 특징: 
 - {features_text}
 
-[작성 가이드라인]:
-1. 위 [사용자 특별 지침]에서 요구하는 말투, 타겟 설정, 강조 사항을 글 전체에 적극적으로 반영하세요.
-2. 제목은 첫 줄에 매력적으로 작성하고 [제목] 같은 머리말은 붙이지 마세요.
-3. 본문 내용에 http, https URL이나 링크 표시([링크] 등)를 절대 넣지 마세요.
-4. 마지막에는 "파트너스 활동을 통해 일정액의 수수료를 제공받을 수 있음" 문구를 반드시 포함하세요.
-5. 너무 딱딱한 설명보다는 실제 사용자가 쓴 것처럼 생생하고 친근하게 작성하세요.
+[작성 필수 가이드라인]:
+1. 글의 구성 순서를 반드시 지키세요:
+   - 첫 번째 줄: 게시글의 제목 (상품명 '{product_info['product_name']}'을 반드시 포함하세요. 클릭률을 극대화할 수 있도록 궁금증을 유발하거나 혜택을 강조하되, 반드시 말이 끝까지 이어지는 완전한 문장으로 60자 이내로 작성하세요.)
+   - 두 번째 줄: "쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다." 문구
+   - 세 번째 줄부터: 본문 내용 (솔직한 후기 스타일)
+2. 제목에 특수문자(#, *)를 남발하지 말고, 실제 카페 인기글처럼 자연스럽게 작성하세요.
+3. 말투는 블로그 마케터 느낌이 아닌, 실제 '내돈내산' 후기처럼 자연스러운 구어체(~해요, ~네요, ~더라구요 등)를 사용하세요.
+4. 본문 내용에 http, https URL이나 링크 표시([링크] 등)를 절대 넣지 마세요.
+5. 전문 용어보다는 실생활에서 느끼는 편리함을 위주로 작성하세요.
+6. 너무 정제된 느낌보다는 이웃과 대화하듯 편안하게 작성하세요.
 """
 
     try:

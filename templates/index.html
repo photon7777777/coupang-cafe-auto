@@ -35,10 +35,7 @@
                     <input type="password" id="gemini_key" placeholder="AI-..." required>
                 </div>
 
-                <div class="form-group full-width">
-                    <label for="guidelines">글쓰기 커스텀 지침</label>
-                    <textarea id="guidelines" placeholder="예: 30대 주부 타겟으로 친근한 말투로 작성해줘. 장점을 3가지로 요약해줘."></textarea>
-                </div>
+
                 
                 <div class="form-group">
                     <label for="naver_id">네이버 ID</label>
@@ -76,7 +73,7 @@
     <script>
         // 페이지 로드 시 저장된 값 불러오기
         window.addEventListener('DOMContentLoaded', () => {
-            const fields = ['partners_id', 'gemini_key', 'guidelines', 'naver_id', 'naver_pw', 'cafe_id', 'menu_id'];
+            const fields = ['partners_id', 'gemini_key', 'naver_id', 'naver_pw', 'cafe_id', 'menu_id'];
             fields.forEach(field => {
                 const saved = localStorage.getItem('coupang_poster_' + field);
                 if (saved) {
@@ -104,7 +101,6 @@
                 coupang_url: document.getElementById('coupang_url').value,
                 partners_id: document.getElementById('partners_id').value,
                 gemini_key: document.getElementById('gemini_key').value,
-                guidelines: document.getElementById('guidelines').value || "자연스럽게 작성해줘",
                 naver_id: document.getElementById('naver_id').value,
                 naver_pw: document.getElementById('naver_pw').value,
                 cafe_id: document.getElementById('cafe_id').value,

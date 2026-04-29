@@ -6,7 +6,11 @@ import os
 # 프로젝트 경로
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, "temp_images")
-BROWSER_PROFILE_DIR = os.path.join(BASE_DIR, "browser_profile")
+
+# 한글 경로 문제를 방지하기 위해 프로필 경로는 시스템 로컬 앱 데이터 폴더 사용
+import os
+local_app_data = os.environ.get('LOCALAPPDATA', BASE_DIR)
+BROWSER_PROFILE_DIR = os.path.join(local_app_data, "CoupangAutoBot", "profile")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 
 # 필요한 디렉토리 생성

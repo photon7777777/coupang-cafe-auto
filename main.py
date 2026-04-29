@@ -22,7 +22,6 @@ class WorkflowRequest(BaseModel):
     coupang_url: str
     partners_id: str
     gemini_key: str
-    guidelines: str
     naver_id: str
     naver_pw: str
     cafe_id: str
@@ -51,16 +50,13 @@ async def run_workflow(req: WorkflowRequest):
         content_full = generate_blog_post(
             api_key=req.gemini_key,
             product_info=scrape_result,
-            guidelines=req.guidelines,
             partner_link=partner_link
         )
         
         # 빈 줄 제거 및 첫 번째 텍스트를 제목으로
         lines = [line for line in content_full.split('\n') if line.strip()]
         title = lines[0].replace("#", "").replace("*", "").strip()
-        if len(title) > 40:
-            title = title[:40] + "..."
-            
+        
         body = '\n'.join(lines[1:]).strip()
 
         # Step 4: 네이버 카페 포스팅
@@ -72,7 +68,8 @@ async def run_workflow(req: WorkflowRequest):
             title=title,
             content=body,
             partner_link=partner_link, # 링크 별도 전달
-            image_url=scrape_result.get("image_url", "")
+            image_url=scrape_result.get("image_url", ""),
+            product_name=scrape_result.get("product_name", "")
         )
         
         if not post_result.get("success"):

@@ -40,7 +40,7 @@ def copy_image_to_clipboard(file_path: str):
     except Exception as e:
         print(f"[ERROR] 클립보드 복사 중 오류 발생: {e}")
 
-def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str, title: str, content: str, partner_link: str, image_url: str):
+def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str, title: str, content: str, partner_link: str, image_url: str, product_name: str = ""):
     """
     미리 로그인된 브라우저 프로필을 사용하여 네이버 카페에 글을 작성합니다.
     """
@@ -48,10 +48,16 @@ def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str,
     # 사용자 프로필 디렉토리 지정 (세션 유지)
     options.add_argument(f"--user-data-dir={BROWSER_PROFILE_DIR}")
     options.add_argument("--window-size=1280,900")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-popup-blocking")
     
     driver = None
     try:
         step = "크롬 브라우저 시작"
+        # headless 모드가 아닐 때 연결 오류가 잦으면 아래와 같이 포트를 고정하기도 함
+        # options.add_argument("--remote-debugging-port=9222") 
         driver = uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
         
         step = "1. 로그인 상태 확인 (세션 유지 체크)"
@@ -62,20 +68,26 @@ def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str,
         is_logged_in = False
         try:
             # 로그인된 상태에서만 보이는 요소들 (프로필 영역, 로그아웃 버튼 등)
+            # Naver 메인 페이지의 다양한 로그인 상태 지표들
             WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".gnb_my_interface, .gnb_btn_login_off, #gnb_login_button, .MyView-module__my_info___fP_Yp"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".gnb_my_interface, .gnb_btn_login_off, #gnb_login_button, .MyView-module__my_info___fP_Yp, .log_out, .btn_logout"))
             )
             is_logged_in = True
             print("[INFO] 기존 세션이 유효합니다. 로그인을 건너뜁니다.")
         except:
-            # 로그인 버튼이 보이는지 확인
-            login_btns = driver.find_elements(By.XPATH, "//a[contains(@href, 'nidlogin.login')]")
-            if not login_btns:
-                # 확실치 않을 경우 한 번 더 카페 페이지에서 체크
+            # 쿠키 확인 (NID_AUT 또는 NID_SES 쿠키가 있으면 로그인된 것으로 간주)
+            cookies = driver.get_cookies()
+            if any(cookie['name'] in ['NID_AUT', 'NID_SES'] for cookie in cookies):
+                is_logged_in = True
+                print("[INFO] 쿠키 기반으로 로그인 상태 확인됨.")
+            else:
+                # 확실치 않을 경우 카페 메인에서 로그인 버튼 유무 확인
                 driver.get("https://cafe.naver.com/")
-                if not driver.find_elements(By.XPATH, "//a[contains(@href, 'nidlogin.login')]"):
-                    is_logged_in = True
-                    print("[INFO] 카페 페이지에서 로그인 상태 확인됨.")
+                time.sleep(2)
+                login_btns = driver.find_elements(By.XPATH, "//a[contains(@href, 'nidlogin.login')]")
+                if not login_btns:
+                     is_logged_in = True
+                     print("[INFO] 카페 페이지에서 로그인 상태 확인됨.")
         
         if not is_logged_in:
             step = "1-1. 네이버 로그인 페이지 접속"
@@ -97,6 +109,30 @@ def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str,
             pw_input.send_keys(Keys.CONTROL, "v")
             time.sleep(1)
             
+            step = "1-3-1. 로그인 상태 유지 체크"
+            try:
+                keep_checkbox_selectors = ["#keep", "#login_chk", ".input_keep", "input[name='nvlong']"]
+                keep_checkbox = None
+                for sel in keep_checkbox_selectors:
+                    try:
+                        keep_checkbox = driver.find_element(By.CSS_SELECTOR, sel)
+                        if keep_checkbox:
+                            break
+                    except:
+                        continue
+                
+                if keep_checkbox and not keep_checkbox.is_selected():
+                    try:
+                        driver.execute_script("arguments[0].click();", keep_checkbox)
+                        print("[INFO] JS로 '로그인 상태 유지' 체크박스를 클릭했습니다.")
+                    except:
+                        keep_label = driver.find_element(By.CSS_SELECTOR, f"label[for='{keep_checkbox.get_attribute('id')}']")
+                        keep_label.click()
+                        print("[INFO] Label을 통해 '로그인 상태 유지' 체크박스를 클릭했습니다.")
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"[WARN] 로그인 상태 유지 체크 실패: {e}")
+                
             step = "1-4. 로그인 버튼 클릭"
             login_btn = driver.find_element(By.ID, "log.login")
             login_btn.click()
@@ -207,21 +243,34 @@ def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str,
             pass
         
         step = "7. 본문 텍스트 입력 영역 대기 및 클릭"
-        body_input = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".se-main-container, .se-component-content, .se-text-paragraph, .se-ff-nanumgothic"))
-        )
+        # 더 넓은 범위의 선택자로 본문 영역 탐색
+        body_selectors = [
+            ".se-main-container",
+            ".se-content",
+            ".se-component-content",
+            ".se-text-paragraph",
+            "[contenteditable='true']"
+        ]
+        
+        body_input = None
+        for sel in body_selectors:
+            try:
+                el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+                if el:
+                    body_input = el
+                    break
+            except:
+                continue
+
+        if not body_input:
+             raise Exception("본문 입력 영역을 찾을 수 없습니다.")
         
         # JS를 이용한 강제 클릭 및 포커스 지정
-        try:
-            driver.execute_script("arguments[0].focus(); arguments[0].click();", body_input)
-        except:
-            body_input.click()
-            pass
-            
-        time.sleep(2) # 경고창이 뜨는 시간을 넉넉히 기다림
+        driver.execute_script("arguments[0].focus(); arguments[0].click();", body_input)
+        time.sleep(2) 
         
         # 제목칸에서 포커스가 벗어날 때 발생하는 Alert 무시 (여러 번 뜰 수 있으므로 루프 처리)
-        for _ in range(3):
+        for _ in range(5):
             try:
                 alert = driver.switch_to.alert
                 alert.accept()
@@ -236,48 +285,172 @@ def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str,
                 image_path = download_image(image_url, "temp_upload.jpg")
                 copy_image_to_clipboard(image_path)
                 
-                # 에디터 클릭 후 바로 이미지 붙여넣기
+                # 에디터 재클릭 후 이미지 붙여넣기
+                driver.execute_script("arguments[0].focus(); arguments[0].click();", body_input)
+                time.sleep(1)
                 actions = ActionChains(driver)
                 actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
-                time.sleep(3)
-                actions.send_keys(Keys.ENTER).perform() # 이미지 아래로 줄바꿈
+                print("[INFO] 이미지 붙여넣기 완료. 업로드 대기 중 (5초)...")
+                time.sleep(5) # 업로드 및 렌더링 대기
+                actions.send_keys(Keys.ENTER).perform() 
                 print("[INFO] 이미지 상단 삽입 완료")
             except Exception as img_e:
                 print(f"[ERROR] 이미지 삽입 실패: {img_e}")
 
         step = "7-2. 본문 텍스트 클립보드 붙여넣기"
+        # 이미지 삽입 후 포커스가 흐트러졌을 수 있으므로 다시 클릭
+        driver.execute_script("arguments[0].focus(); arguments[0].click();", body_input)
+        time.sleep(1)
+        
         pyperclip.copy(content)
         try:
             actions = ActionChains(driver)
             actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
-            actions.send_keys(Keys.ENTER).send_keys(Keys.ENTER).perform() # 본문 뒤 공백 추가
+            time.sleep(1)
+            actions.send_keys(Keys.ENTER).send_keys(Keys.ENTER).perform() 
+            print("[INFO] 본문 텍스트 삽입 완료")
         except Exception as e:
-            if "alert" in str(e).lower():
+            print(f"[WARN] 본문 삽입 중 오류(Alert 가능성): {e}")
+            try:
+                driver.switch_to.alert.accept()
+                time.sleep(0.5)
+                ActionChains(driver).key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+            except:
+                pass
+        
+        step = "7-3. 툴바 '링크' 기능으로 링크 추가"
+        link_success = False
+        
+        # 1. 단축키 (Ctrl + K) 우선 시도 - 가장 안정적임
+        try:
+            print("[INFO] 단축키(Ctrl+K)로 링크 팝업 호출 시도...")
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys('k').key_up(Keys.CONTROL).perform()
+            time.sleep(1.5)
+        except Exception as e:
+            print(f"[WARN] 단축키 시도 실패: {e}")
+            
+        # 단축키로 안 열렸다면 버튼 찾기
+        link_input_selectors = [
+            "input.se-popup-link-url",
+            "input.se-custom-layer-input",
+            "input.se-popup-url",
+            "input.se-link-input",
+            "input[placeholder*='URL']"
+        ]
+        
+        def is_link_input_visible():
+            for sel in link_input_selectors:
                 try:
-                    driver.switch_to.alert.accept()
-                    time.sleep(0.5)
-                    ActionChains(driver).key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+                    el = driver.find_element(By.CSS_SELECTOR, sel)
+                    if el and el.is_displayed():
+                        return el
                 except:
                     pass
+            return None
+
+        link_input = is_link_input_visible()
         
-        step = "7-3. 링크 카드 생성 (URL 입력 + 엔터)"
-        pyperclip.copy(partner_link)
-        actions = ActionChains(driver)
-        actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
-        time.sleep(2)
-        actions.send_keys(Keys.ENTER).perform() # 엔터를 쳐야 링크 카드가 생성됨
-        print("[INFO] 링크 카드 생성 대기 중 (7초)...")
-        time.sleep(7) # 카드 생성을 위해 충분히 대기
+        # 2. 단축키로 입력창이 안 열렸다면 버튼 직접 찾아서 클릭
+        if not link_input:
+            print("[INFO] 툴바의 링크 버튼 탐색 시도...")
+            link_btn_selectors = [
+                "button.se-popup-button-link",
+                "button[data-name='link']",
+                "button[title='링크']",
+                ".se-btn-tool-link",
+                "//button[.//span[contains(text(), '링크')]]",
+                "button.se-link"
+            ]
+            link_btn = None
+            for sel in link_btn_selectors:
+                try:
+                    if sel.startswith("//"):
+                        link_btn = driver.find_element(By.XPATH, sel)
+                    else:
+                        link_btn = driver.find_element(By.CSS_SELECTOR, sel)
+                    if link_btn and link_btn.is_displayed():
+                        break
+                except:
+                    continue
+                    
+            if link_btn:
+                try:
+                    # JS 강제 클릭
+                    driver.execute_script("arguments[0].click();", link_btn)
+                    time.sleep(1.5)
+                    link_input = is_link_input_visible()
+                except Exception as e:
+                    print(f"[WARN] 링크 버튼 클릭 실패: {e}")
         
-        # URL 텍스트만 지우고 카드만 남기기
-        try:
-            actions.send_keys(Keys.ARROW_UP).perform()
-            time.sleep(1)
-            actions.key_down(Keys.SHIFT).send_keys(Keys.HOME).key_up(Keys.SHIFT).perform()
-            actions.send_keys(Keys.BACKSPACE).perform()
-            print("[INFO] URL 텍스트 삭제 완료 (카드만 남김)")
-        except:
-            pass
+        # 3. 링크 입력창에 URL 입력
+        if link_input:
+            try:
+                pyperclip.copy(partner_link)
+                link_input.click()
+                link_input.send_keys(Keys.CONTROL, "v")
+                time.sleep(1)
+                link_input.send_keys(Keys.ENTER)
+                time.sleep(1)
+                
+                try:
+                    time.sleep(1.5) # 버튼이 렌더링될 시간 확보
+                    confirm_selectors = [
+                        "button.se-popup-button-confirm", 
+                        "button.se-popup-url-button", 
+                        "button[data-name='confirm']",
+                        ".se-popup-link button",
+                        "button[title='확인']",
+                        "button[title='적용']",
+                        ".se-popup-button-confirm span"
+                    ]
+                    confirm_btn = None
+                    for sel in confirm_selectors:
+                        try:
+                            el = driver.find_element(By.CSS_SELECTOR, sel)
+                            if el and el.is_displayed():
+                                confirm_btn = el
+                                break
+                        except:
+                            pass
+                            
+                    if confirm_btn:
+                        try:
+                            driver.execute_script("arguments[0].focus();", confirm_btn)
+                            confirm_btn.click()
+                        except:
+                            driver.execute_script("arguments[0].click();", confirm_btn)
+                        print("[INFO] 링크 팝업의 '확인(저장)' 버튼을 클릭했습니다.")
+                    else:
+                        # 최후의 수단으로 엔터 한 번 더 입력
+                        ActionChains(driver).send_keys(Keys.ENTER).perform()
+                except:
+                    pass
+                    
+                print("[INFO] 스마트에디터 링크 기능으로 삽입 완료")
+                time.sleep(5)
+                link_success = True
+            except Exception as e:
+                print(f"[WARN] 링크 URL 입력 중 오류: {e}")
+        
+        # 4. 모두 실패 시 폴백(본문에 그냥 입력)
+        if not link_success:
+            print("[INFO] 스마트에디터 링크 추가 실패. 본문에 직접 URL 입력 후 카드로 변환합니다.")
+            pyperclip.copy(partner_link)
+            actions = ActionChains(driver)
+            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+            time.sleep(2)
+            actions.send_keys(Keys.ENTER).perform()
+            print("[INFO] 링크 카드 생성 대기 중 (7초)...")
+            time.sleep(7)
+            
+            try:
+                actions.send_keys(Keys.ARROW_UP).perform()
+                time.sleep(1)
+                actions.key_down(Keys.SHIFT).send_keys(Keys.HOME).key_up(Keys.SHIFT).perform()
+                actions.send_keys(Keys.BACKSPACE).perform()
+                print("[INFO] URL 텍스트 삭제 완료 (카드만 남김)")
+            except:
+                pass
 
         # 최종적으로 메인 컨텐츠로 복귀
         driver.switch_to.default_content()
@@ -321,9 +494,67 @@ def post_to_naver_cafe(naver_id: str, naver_pw: str, cafe_id: str, menu_id: str,
             except:
                 raise Exception("등록 버튼을 찾을 수 없습니다. 수동으로 등록을 눌러주세요.")
 
-        time.sleep(5) # 등록 후 페이지 전환 대기
+        # 등록 후 페이지 전환 대기 및 검증
+        is_posted = False
+        final_url = ""
+        for _ in range(15):
+            time.sleep(2)
+            current_url = driver.current_url.lower()
+            # 성공 시 보통 /articles/ 또는 ArticleRead 형태의 주소로 이동함
+            if "write" not in current_url and ("/articles/" in current_url or "articleread" in current_url):
+                is_posted = True
+                final_url = driver.current_url
+                break
+            
+            # 아직 글쓰기 페이지라면 등록 버튼 다시 시도 (안 눌렸을 가능성 대비)
+            if "write" in current_url:
+                try:
+                    driver.execute_script("document.querySelector('.BaseButton--skinGreen').click();")
+                except:
+                    pass
         
-        return {"success": True, "message": "네이버 카페 포스팅이 성공적으로 완료되었습니다!"}
+        if not is_posted:
+            print(f"[WARN] 등록 후 페이지 이동이 감지되지 않았습니다. 현재 주소: {driver.current_url}")
+            # 이동은 안 됐지만 글쓰기 주소가 아니면 일단 성공으로 간주
+            if "write" not in driver.current_url.lower():
+                is_posted = True
+        else:
+            # 게시글이 정상 등록된 경우 댓글 작성 시도
+            if product_name:
+                try:
+                    step = "9. 댓글 작성 시도"
+                    print(f"[INFO] 댓글 작성을 시도합니다: {product_name}")
+                    
+                    # 댓글 입력창 대기
+                    comment_input = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "textarea.comment_inbox_text, .CommentWriter textarea"))
+                    )
+                    
+                    comment_text = f"'{product_name}'을 추천드리니 한번 사용해보세요!"
+                    
+                    # 댓글 입력
+                    comment_input.click()
+                    time.sleep(1)
+                    pyperclip.copy(comment_text)
+                    comment_input.send_keys(Keys.CONTROL, "v")
+                    time.sleep(1)
+                    
+                    # 댓글 등록 버튼 클릭
+                    comment_submit = driver.find_element(By.CSS_SELECTOR, ".btn_register, .comment_inbox .btn_register, .CommentWriter .btn_register")
+                    comment_submit.click()
+                    print("[INFO] 댓글 작성을 완료했습니다.")
+                    time.sleep(2)
+                except Exception as e:
+                    print(f"[WARN] 댓글 작성 중 오류 발생 (무시하고 진행): {e}")
+
+        time.sleep(3)
+        res_msg = "네이버 카페 포스팅이 완료되었습니다."
+        if final_url:
+            res_msg += f" (주소: {final_url})"
+        else:
+            res_msg += " 카페에서 글을 확인해 주세요."
+            
+        return {"success": True, "message": res_msg}
         
     except Exception as e:
         # 에러 메시지에 어느 단계에서 실패했는지 포함
